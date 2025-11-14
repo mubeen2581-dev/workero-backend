@@ -7,6 +7,8 @@ use App\Http\Controllers\InventoryController;
 use App\Http\Controllers\WarehouseController;
 use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\LeadController;
+use App\Http\Controllers\QuoteController;
+use App\Http\Controllers\JobController;
 
 Route::get('/', function () {
     return response()->json([
@@ -77,6 +79,33 @@ Route::middleware(['auth.jwt'])->group(function () {
         Route::get('/{id}/activities', [LeadController::class, 'activities']);
         Route::post('/{id}/status', [LeadController::class, 'updateStatus']);
         Route::post('/{id}/assign', [LeadController::class, 'assign']);
+    });
+    
+    // Quote routes (Admin/Manager/Dispatcher/Technician can view, others need specific permissions)
+    Route::prefix('quotes')->group(function () {
+        Route::get('/', [QuoteController::class, 'index'])->middleware('role:admin,manager,dispatcher,technician');
+        Route::post('/', [QuoteController::class, 'store'])->middleware('role:admin,manager,dispatcher,technician');
+        Route::get('/{id}', [QuoteController::class, 'show'])->middleware('role:admin,manager,dispatcher,technician,client');
+        Route::put('/{id}', [QuoteController::class, 'update'])->middleware('role:admin,manager,dispatcher,technician');
+        Route::delete('/{id}', [QuoteController::class, 'destroy'])->middleware('role:admin,manager');
+        Route::post('/{id}/send', [QuoteController::class, 'send'])->middleware('role:admin,manager,dispatcher');
+        Route::post('/{id}/accept', [QuoteController::class, 'accept'])->middleware('role:admin,manager,client');
+        Route::post('/{id}/reject', [QuoteController::class, 'reject'])->middleware('role:admin,manager,client');
+        Route::post('/{id}/convert-to-job', [QuoteController::class, 'convertToJob'])->middleware('role:admin,manager,dispatcher');
+        Route::get('/{id}/pdf', [QuoteController::class, 'downloadPdf'])->middleware('role:admin,manager,dispatcher,technician,client');
+        Route::get('/{id}/pdf/stream', [QuoteController::class, 'streamPdf'])->middleware('role:admin,manager,dispatcher,technician,client');
+    });
+    
+    // Job routes (Admin/Manager can do everything, Technician can view/update own, Dispatcher can view)
+    Route::prefix('jobs')->group(function () {
+        Route::get('/', [JobController::class, 'index'])->middleware('role:admin,manager,dispatcher,technician');
+        Route::post('/', [JobController::class, 'store'])->middleware('role:admin,manager');
+        Route::get('/{id}', [JobController::class, 'show'])->middleware('role:admin,manager,dispatcher,technician,client');
+        Route::put('/{id}', [JobController::class, 'update'])->middleware('role:admin,manager,technician');
+        Route::delete('/{id}', [JobController::class, 'destroy'])->middleware('role:admin,manager');
+        Route::post('/{id}/assign', [JobController::class, 'assign'])->middleware('role:admin,manager');
+        Route::post('/{id}/complete', [JobController::class, 'complete'])->middleware('role:admin,manager,technician');
+        Route::get('/{id}/activities', [JobController::class, 'activities'])->middleware('role:admin,manager,dispatcher,technician');
     });
 });
 
