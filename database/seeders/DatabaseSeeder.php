@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Models\Client;
 use Database\Seeders\QuoteSeeder;
 use Database\Seeders\JobSeeder;
+use Database\Seeders\LeadSeeder;
 
 class DatabaseSeeder extends Seeder
 {
@@ -153,6 +154,9 @@ class DatabaseSeeder extends Seeder
         $this->command->info('  Dispatcher: dispatcher@workero.com');
         $this->command->info('  Warehouse:  warehouse@workero.com');
         $this->command->info('  Client:     client@workero.com');
+        
+        // Seed leads
+        $this->call(LeadSeeder::class);
         
         // Seed quotes
         $this->call(QuoteSeeder::class);
