@@ -15,7 +15,7 @@ return [
     |
     */
 
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => ['api/*', 'sanctum/csrf-cookie', 'auth/*', '*'],
 
     'allowed_methods' => ['*'],
 
@@ -27,16 +27,16 @@ return [
         'https://workero.xepos.co.uk',        // Production frontend (HTTPS)
         'http://workero.xepos.co.uk',         // Production frontend (HTTP)
         'http://api-workero.xepos.co.uk',     // API domain (HTTP - no SSL)
-        'https://api-workero.xepos.co.uk',    // API domain (HTTPS - if SSL added later)
+        'https://api-workero.xepos.co.uk',    // API domain (HTTPS)
     ],
 
     'allowed_origins_patterns' => [],
 
     'allowed_headers' => ['*'],
 
-    'exposed_headers' => [],
+    'exposed_headers' => ['Authorization'],
 
-    'max_age' => 0,
+    'max_age' => 86400,
 
     'supports_credentials' => true,
 

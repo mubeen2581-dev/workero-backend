@@ -294,29 +294,5 @@ return [
         ],
     ],
 
-    /*
-    |--------------------------------------------------------------------------
-    | Permission Helpers
-    |--------------------------------------------------------------------------
-    |
-    | Helper functions to check permissions for roles
-    |
-    */
-
-    'hasPermission' => function ($role, $permission) {
-        $roles = config('permissions.roles');
-        
-        if (!isset($roles[$role])) {
-            return false;
-        }
-        
-        return $roles[$role]['permissions'][$permission] ?? false;
-    },
-
-    'getRolePermissions' => function ($role) {
-        $roles = config('permissions.roles');
-        
-        return $roles[$role]['permissions'] ?? [];
-    },
 ];
 
