@@ -65,9 +65,24 @@ class QuoteController extends Controller
             'items.*.quantity' => 'required|numeric|min:0.01',
             'items.*.unit_price' => 'required|numeric|min:0',
             'items.*.tax_rate' => 'nullable|numeric|min:0|max:100',
+            'items.*.group_name' => 'nullable|string|max:255',
+            'items.*.sort_order' => 'nullable|integer|min:0',
+            'items.*.option_type' => 'nullable|in:good,better,best,optional,required',
+            'items.*.material_choice_id' => 'nullable|uuid',
+            'items.*.material_options' => 'nullable|array',
+            'items.*.is_optional' => 'nullable|boolean',
+            'items.*.category' => 'nullable|string|max:255',
             'valid_until' => 'required|date|after:today',
             'notes' => 'nullable|string',
             'profit_margin' => 'nullable|numeric|min:0|max:100',
+            'requires_esignature' => 'nullable|boolean',
+            'package_type' => 'nullable|in:basic,standard,premium',
+            'variants' => 'nullable|array',
+            'deposit_amount' => 'nullable|numeric|min:0',
+            'deposit_percentage' => 'nullable|numeric|min:0|max:100',
+            'payment_schedule' => 'nullable|array',
+            'permit_costs' => 'nullable|array',
+            'total_permit_cost' => 'nullable|numeric|min:0',
         ]);
 
         if ($validator->fails()) {
@@ -110,10 +125,19 @@ class QuoteController extends Controller
                 'status' => 'draft',
                 'valid_until' => $request->input('valid_until'),
                 'notes' => $request->input('notes'),
+                'requires_esignature' => $request->input('requires_esignature', false),
+                'package_type' => $request->input('package_type'),
+                'variants' => $request->input('variants'),
+                'esignature_status' => $request->input('requires_esignature', false) ? 'pending' : null,
+                'deposit_amount' => $request->input('deposit_amount'),
+                'deposit_percentage' => $request->input('deposit_percentage'),
+                'payment_schedule' => $request->input('payment_schedule'),
+                'permit_costs' => $request->input('permit_costs'),
+                'total_permit_cost' => $request->input('total_permit_cost', 0),
             ]);
             
             // Create quote items
-            foreach ($request->input('items') as $itemData) {
+            foreach ($request->input('items') as $index => $itemData) {
                 $quantity = $itemData['quantity'];
                 $unitPrice = $itemData['unit_price'];
                 $taxRate = $itemData['tax_rate'] ?? 0;
@@ -126,6 +150,13 @@ class QuoteController extends Controller
                     'unit_price' => $unitPrice,
                     'tax_rate' => $taxRate,
                     'line_total' => $lineTotal,
+                    'group_name' => $itemData['group_name'] ?? null,
+                    'sort_order' => $itemData['sort_order'] ?? $index,
+                    'option_type' => $itemData['option_type'] ?? null,
+                    'material_choice_id' => $itemData['material_choice_id'] ?? null,
+                    'material_options' => $itemData['material_options'] ?? null,
+                    'is_optional' => $itemData['is_optional'] ?? false,
+                    'category' => $itemData['category'] ?? null,
                 ]);
             }
             
@@ -206,6 +237,13 @@ class QuoteController extends Controller
                         'unit_price' => $unitPrice,
                         'tax_rate' => $taxRate,
                         'line_total' => $lineTotal,
+                        'group_name' => $item['group_name'] ?? null,
+                        'sort_order' => $item['sort_order'] ?? 0,
+                        'option_type' => $item['option_type'] ?? null,
+                        'material_choice_id' => $item['material_choice_id'] ?? null,
+                        'material_options' => $item['material_options'] ?? null,
+                        'is_optional' => $item['is_optional'] ?? false,
+                        'category' => $item['category'] ?? null,
                     ]);
                 }
                 
@@ -260,7 +298,9 @@ class QuoteController extends Controller
     public function send($id)
     {
         $companyId = $this->getCompanyId();
-        $quote = Quote::where('company_id', $companyId)->findOrFail($id);
+        $quote = Quote::where('company_id', $companyId)
+            ->with('client', 'items', 'company')
+            ->findOrFail($id);
         
         // Only draft or sent quotes can be sent
         if (!in_array($quote->status, ['draft', 'sent'])) {
@@ -268,13 +308,25 @@ class QuoteController extends Controller
         }
         
         $quote->status = 'sent';
+        
+        // If e-signature is required, update status
+        if ($quote->requires_esignature) {
+            $quote->esignature_status = 'sent';
+            $quote->esignature_sent_at = now();
+        }
+        
         $quote->save();
         
-        // TODO: Send email/WhatsApp notification
-        // This will be implemented when email integration is added
+        // Send email notification
+        try {
+            \Mail::to($quote->client->email)->send(new \App\Mail\QuoteMail($quote));
+        } catch (\Exception $e) {
+            \Log::error('Failed to send quote email: ' . $e->getMessage());
+            // Continue even if email fails
+        }
         
         return $this->success(
-            $quote->fresh()->load('client', 'items')->toArray(),
+            $quote->fresh()->load('client', 'items', 'company')->toArray(),
             'Quote sent successfully'
         );
     }
@@ -420,6 +472,133 @@ class QuoteController extends Controller
         $pdfService = new QuotePdfService();
         
         return $pdfService->stream($quote);
+    }
+
+    /**
+     * Sign quote with e-signature
+     */
+    public function sign(Request $request, $id)
+    {
+        $validator = Validator::make($request->all(), [
+            'signature_data' => 'required|string',
+            'signature_type' => 'nullable|in:electronic,handwritten',
+            'ip_address' => 'nullable|ip',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->error('Validation error', $validator->errors(), 422);
+        }
+
+        $quote = Quote::with('client', 'items')->findOrFail($id);
+        
+        // Check if quote requires e-signature
+        if (!$quote->requires_esignature) {
+            return $this->error('This quote does not require e-signature', null, 422);
+        }
+
+        // Check if already signed
+        if ($quote->esignature_status === 'signed') {
+            return $this->error('Quote has already been signed', null, 422);
+        }
+
+        DB::beginTransaction();
+        try {
+            // Create signature record
+            $signature = \App\Models\QuoteSignature::create([
+                'quote_id' => $quote->id,
+                'user_id' => auth()->id(),
+                'signature_data' => $request->input('signature_data'),
+                'signature_type' => $request->input('signature_type', 'electronic'),
+                'ip_address' => $request->ip(),
+                'signed_at' => now(),
+            ]);
+
+            // Update quote status
+            $quote->esignature_status = 'signed';
+            $quote->esignature_signed_at = now();
+            $quote->has_signature = true;
+            $quote->status = 'accepted';
+            $quote->save();
+
+            DB::commit();
+
+            return $this->success(
+                $quote->fresh()->load('client', 'items', 'signatures')->toArray(),
+                'Quote signed successfully'
+            );
+        } catch (\Exception $e) {
+            DB::rollBack();
+            return $this->error('Failed to sign quote: ' . $e->getMessage(), null, 500);
+        }
+    }
+
+    /**
+     * Decline quote
+     */
+    public function decline(Request $request, $id)
+    {
+        $quote = Quote::findOrFail($id);
+        
+        if (!$quote->requires_esignature) {
+            return $this->error('This quote does not require e-signature', null, 422);
+        }
+
+        if ($quote->esignature_status === 'signed') {
+            return $this->error('Quote has already been signed', null, 422);
+        }
+
+        $quote->esignature_status = 'declined';
+        $quote->status = 'rejected';
+        $quote->save();
+
+        return $this->success(
+            $quote->fresh()->load('client', 'items')->toArray(),
+            'Quote declined successfully'
+        );
+    }
+
+    /**
+     * Generate contract from quote
+     */
+    public function generateContract($id)
+    {
+        $companyId = $this->getCompanyId();
+        $quote = Quote::where('company_id', $companyId)
+            ->with('client', 'items', 'company')
+            ->findOrFail($id);
+        
+        // Mark contract as generated
+        $quote->contract_generated = true;
+        $quote->save();
+        
+        // In a real implementation, you would generate a PDF contract here
+        // For now, we'll just mark it as generated
+        
+        return $this->success(
+            $quote->fresh()->load('client', 'items', 'company')->toArray(),
+            'Contract generated successfully'
+        );
+    }
+
+    /**
+     * Download contract PDF
+     */
+    public function downloadContractPdf($id)
+    {
+        $companyId = $this->getCompanyId();
+        $quote = Quote::where('company_id', $companyId)
+            ->with('client', 'items', 'company')
+            ->findOrFail($id);
+        
+        if (!$quote->contract_generated) {
+            return $this->error('Contract has not been generated yet', null, 422);
+        }
+        
+        // Use the existing PDF service to generate contract
+        $pdfService = new QuotePdfService();
+        $filename = 'contract-' . substr($quote->id, 0, 8) . '.pdf';
+        
+        return $pdfService->download($quote, $filename);
     }
 }
 

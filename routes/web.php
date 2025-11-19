@@ -91,6 +91,8 @@ Route::middleware(['auth.jwt'])->group(function () {
         Route::post('/{id}/send', [QuoteController::class, 'send'])->middleware('role:admin,manager,dispatcher');
         Route::post('/{id}/accept', [QuoteController::class, 'accept'])->middleware('role:admin,manager,client');
         Route::post('/{id}/reject', [QuoteController::class, 'reject'])->middleware('role:admin,manager,client');
+        Route::post('/{id}/sign', [QuoteController::class, 'sign']);
+        Route::post('/{id}/decline', [QuoteController::class, 'decline']);
         Route::post('/{id}/convert-to-job', [QuoteController::class, 'convertToJob'])->middleware('role:admin,manager,dispatcher');
         Route::get('/{id}/pdf', [QuoteController::class, 'downloadPdf'])->middleware('role:admin,manager,dispatcher,technician,client');
         Route::get('/{id}/pdf/stream', [QuoteController::class, 'streamPdf'])->middleware('role:admin,manager,dispatcher,technician,client');

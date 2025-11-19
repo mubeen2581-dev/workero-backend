@@ -115,6 +115,10 @@ Route::middleware(['auth.jwt'])->group(function () {
 
     // Quote routes (Admin/Manager/Dispatcher/Technician can view, others need specific permissions)
     Route::prefix('quotes')->group(function () {
+        Route::post('/{id}/sign', [QuoteController::class, 'sign']);
+        Route::post('/{id}/decline', [QuoteController::class, 'decline']);
+        Route::post('/{id}/generate-contract', [QuoteController::class, 'generateContract'])->middleware('role:admin,manager,dispatcher');
+        Route::get('/{id}/contract/pdf', [QuoteController::class, 'downloadContractPdf'])->middleware('role:admin,manager,dispatcher,technician,client');
         Route::get('/', [QuoteController::class, 'index'])->middleware('role:admin,manager,dispatcher,technician');
         Route::post('/', [QuoteController::class, 'store'])->middleware('role:admin,manager,dispatcher,technician');
         Route::get('/{id}', [QuoteController::class, 'show'])->middleware('role:admin,manager,dispatcher,technician,client');
