@@ -130,6 +130,14 @@ Route::middleware(['auth.jwt'])->group(function () {
         Route::post('/{id}/convert-to-job', [QuoteController::class, 'convertToJob'])->middleware('role:admin,manager,dispatcher');
         Route::get('/{id}/pdf', [QuoteController::class, 'downloadPdf'])->middleware('role:admin,manager,dispatcher,technician,client');
         Route::get('/{id}/pdf/stream', [QuoteController::class, 'streamPdf'])->middleware('role:admin,manager,dispatcher,technician,client');
+        
+        // AI Quote Builder routes
+        Route::prefix('ai')->group(function () {
+            Route::post('/generate', [\App\Http\Controllers\AIQuoteController::class, 'generateSuggestions'])->middleware('role:admin,manager,dispatcher,technician');
+            Route::get('/historical-pricing', [\App\Http\Controllers\AIQuoteController::class, 'getHistoricalPricing'])->middleware('role:admin,manager,dispatcher');
+            Route::post('/material-recommendations', [\App\Http\Controllers\AIQuoteController::class, 'getMaterialRecommendations'])->middleware('role:admin,manager,dispatcher,technician');
+            Route::post('/optimize-pricing', [\App\Http\Controllers\AIQuoteController::class, 'optimizePricing'])->middleware('role:admin,manager,dispatcher');
+        });
     });
 
     // Job routes (Admin/Manager can do everything, Technician can view/update own, Dispatcher can view)

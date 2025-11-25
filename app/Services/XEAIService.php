@@ -98,5 +98,42 @@ class XEAIService
             throw $e;
         }
     }
+
+    /**
+     * Generate quote suggestions using XE AI Workspace
+     */
+    public function generateQuoteSuggestions(string $description, array $context = []): ?array
+    {
+        try {
+            if (empty($this->apiUrl) || empty($this->apiKey)) {
+                // XE AI not configured, return null to use fallback
+                return null;
+            }
+
+            $response = Http::withHeaders([
+                'Authorization' => 'Bearer ' . $this->apiKey,
+                'Content-Type' => 'application/json',
+            ])->timeout(30)->post("{$this->apiUrl}/quote/suggestions", [
+                'description' => $description,
+                'context' => $context,
+                'smart_pricing' => $context['smart_pricing'] ?? true,
+                'company_id' => $context['company_id'] ?? null,
+            ]);
+
+            if ($response->successful()) {
+                return $response->json();
+            }
+
+            Log::warning('XE AI Quote Suggestions API Error', [
+                'status' => $response->status(),
+                'body' => $response->body(),
+            ]);
+
+            return null;
+        } catch (\Exception $e) {
+            Log::warning('XE AI Quote Suggestions Error', ['message' => $e->getMessage()]);
+            return null; // Return null to trigger fallback
+        }
+    }
 }
 
