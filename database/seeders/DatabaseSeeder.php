@@ -167,6 +167,9 @@ class DatabaseSeeder extends Seeder
         
         // Seed inventory (warehouses, items, suppliers)
         $this->call(InventorySeeder::class);
+
+        // Seed technician availability defaults
+        $this->call(TechnicianAvailabilitySeeder::class);
     }
 }
 

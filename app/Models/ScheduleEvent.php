@@ -14,6 +14,7 @@ class ScheduleEvent extends Model
         'company_id',
         'job_id',
         'technician_id',
+        'recurring_schedule_id',
         'title',
         'start',
         'end',
@@ -23,11 +24,16 @@ class ScheduleEvent extends Model
         'description',
         'location',
         'color',
+        'travel_time_minutes',
+        'buffer_minutes',
+        'flexibility_minutes',
+        'metadata',
     ];
 
     protected $casts = [
         'start' => 'datetime',
         'end' => 'datetime',
+        'metadata' => 'array',
     ];
 
     /**
@@ -52,6 +58,11 @@ class ScheduleEvent extends Model
     public function technician()
     {
         return $this->belongsTo(User::class, 'technician_id');
+    }
+
+    public function recurringSchedule()
+    {
+        return $this->belongsTo(RecurringSchedule::class);
     }
 }
 

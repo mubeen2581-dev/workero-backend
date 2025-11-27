@@ -17,6 +17,7 @@ use App\Http\Controllers\SupplierController;
 use App\Http\Controllers\MessageController;
 use App\Http\Controllers\ComplianceController;
 use App\Http\Controllers\AnalyticsController;
+use App\Http\Controllers\CalendarSyncController;
 
 /*
 |--------------------------------------------------------------------------
@@ -155,8 +156,38 @@ Route::middleware(['auth.jwt'])->group(function () {
     // Schedule routes (Admin/Manager only)
     Route::prefix('schedule')->middleware('role:admin,manager')->group(function () {
         Route::get('/events', [ScheduleController::class, 'events']);
+        Route::post('/events', [ScheduleController::class, 'store']);
+        Route::put('/events/{id}', [ScheduleController::class, 'update']);
+        Route::delete('/events/{id}', [ScheduleController::class, 'destroy']);
+        Route::get('/events/{id}', [ScheduleController::class, 'show']);
         Route::get('/availability', [ScheduleController::class, 'availability']);
         Route::get('/conflicts', [ScheduleController::class, 'conflicts']);
+        Route::get('/travel-time', [ScheduleController::class, 'travelTime']);
+        Route::post('/optimize-route', [ScheduleController::class, 'optimizeRoute']);
+        Route::get('/workload-balance', [ScheduleController::class, 'workloadBalance']);
+        Route::post('/auto-assign', [ScheduleController::class, 'autoAssign']);
+        Route::get('/events/ical', [ScheduleController::class, 'exportIcal']);
+        Route::get('/recurring', [ScheduleController::class, 'recurringIndex']);
+        Route::post('/recurring', [ScheduleController::class, 'storeRecurring']);
+        Route::get('/recurring/{id}', [ScheduleController::class, 'recurringShow']);
+        Route::put('/recurring/{id}', [ScheduleController::class, 'updateRecurring']);
+        Route::delete('/recurring/{id}', [ScheduleController::class, 'destroyRecurring']);
+        Route::post('/recurring/{id}/generate', [ScheduleController::class, 'generateRecurring']);
+    });
+
+    // Calendar Sync routes
+    Route::prefix('calendar')->group(function () {
+        // Callback doesn't require auth (Google redirects here)
+        Route::get('/callback', [CalendarSyncController::class, 'callback']);
+        
+        // Other routes require auth
+        Route::middleware('role:admin,manager')->group(function () {
+            Route::get('/connect', [CalendarSyncController::class, 'connect']);
+            Route::get('/status', [CalendarSyncController::class, 'status']);
+            Route::post('/sync/push', [CalendarSyncController::class, 'syncPush']);
+            Route::post('/sync/pull', [CalendarSyncController::class, 'syncPull']);
+            Route::post('/disconnect', [CalendarSyncController::class, 'disconnect']);
+        });
     });
 
     // Invoice routes (Admin/Manager/Dispatcher can manage, Client can view own and pay)

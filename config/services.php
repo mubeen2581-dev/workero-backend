@@ -31,8 +31,12 @@ return [
         'webhook_secret' => env('WHATS_HUB_WEBHOOK_SECRET'),
     ],
 
+    'openroute' => [
+        'api_key' => env('OPENROUTE_API_KEY'), // Optional - free tier available without key
+    ],
+
     'google_maps' => [
-        'api_key' => env('GOOGLE_MAPS_API_KEY'),
+        'api_key' => env('GOOGLE_MAPS_API_KEY'), // Deprecated - kept for backward compatibility
     ],
 
     'google_calendar' => [
