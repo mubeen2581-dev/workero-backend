@@ -272,7 +272,9 @@ Route::middleware(['auth.jwt'])->group(function () {
     Route::prefix('messages')->middleware('role:admin,manager,dispatcher,technician')->group(function () {
         Route::get('/', [MessageController::class, 'index']);
         Route::post('/send', [MessageController::class, 'send']);
+        Route::post('/upload', [MessageController::class, 'uploadFile']);
         Route::get('/threads', [MessageController::class, 'threads']);
+        Route::get('/threads/{id}/messages', [MessageController::class, 'threadMessages']);
         Route::get('/templates', [MessageController::class, 'templates']);
     });
 
