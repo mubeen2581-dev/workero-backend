@@ -5,6 +5,7 @@ namespace App\Http\Controllers;
 use App\Models\InventoryItem;
 use App\Models\StockMovement;
 use App\Models\VanStock;
+use App\Models\StockAudit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\DB;
@@ -650,6 +651,190 @@ class InventoryController extends Controller
             ->get();
         
         return $this->success($materials->toArray());
+    }
+
+    /**
+     * Create a stock audit
+     */
+    public function createAudit(Request $request)
+    {
+        $companyId = $this->getCompanyId();
+        $userId = auth()->id();
+
+        $validator = \Illuminate\Support\Facades\Validator::make($request->all(), [
+            'item_id' => 'required|uuid|exists:inventory_items,id',
+            'warehouse_id' => 'nullable|uuid|exists:warehouses,id',
+            'expected_quantity' => 'required|numeric|min:0',
+            'actual_quantity' => 'required|numeric|min:0',
+            'reason' => 'nullable|string|in:damaged,lost,theft,error,other',
+            'notes' => 'nullable|string|max:1000',
+            'adjust_stock' => 'sometimes|boolean',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->error('Validation error', $validator->errors(), 422);
+        }
+
+        // Verify item belongs to company
+        $item = InventoryItem::where('company_id', $companyId)
+            ->findOrFail($request->input('item_id'));
+
+        // Verify warehouse if provided
+        if ($request->filled('warehouse_id')) {
+            $warehouse = \App\Models\Warehouse::where('company_id', $companyId)
+                ->find($request->input('warehouse_id'));
+            if (!$warehouse) {
+                return $this->error('Warehouse not found or does not belong to your company', 422);
+            }
+        }
+
+        $expectedQuantity = $request->input('expected_quantity');
+        $actualQuantity = $request->input('actual_quantity');
+        $variance = $actualQuantity - $expectedQuantity;
+
+        DB::beginTransaction();
+        try {
+            // Create audit record
+            $audit = StockAudit::create([
+                'company_id' => $companyId,
+                'item_id' => $item->id,
+                'warehouse_id' => $request->input('warehouse_id'),
+                'expected_quantity' => $expectedQuantity,
+                'actual_quantity' => $actualQuantity,
+                'variance' => $variance,
+                'reason' => $request->input('reason'),
+                'notes' => $request->input('notes'),
+                'audited_by' => $userId,
+                'audited_at' => now(),
+                'adjusted' => $request->input('adjust_stock', false),
+            ]);
+
+            // Adjust stock if requested
+            if ($request->input('adjust_stock', false)) {
+                $oldStock = $item->current_stock;
+                $newStock = $actualQuantity;
+                $item->current_stock = $newStock;
+                $item->last_audit_date = now();
+                $item->save();
+
+                // Create stock movement for the adjustment
+                StockMovement::create([
+                    'company_id' => $companyId,
+                    'item_id' => $item->id,
+                    'type' => $variance > 0 ? 'in' : 'out',
+                    'quantity' => abs($variance),
+                    'from_location' => $variance < 0 ? 'warehouse' : null,
+                    'to_location' => $variance > 0 ? 'warehouse' : null,
+                    'reason' => 'Stock audit adjustment',
+                    'reference' => $audit->id,
+                    'performed_by' => $userId,
+                    'performed_at' => now(),
+                    'notes' => "Audit adjustment: Expected {$expectedQuantity}, Actual {$actualQuantity}. " . ($request->input('notes') ?? ''),
+                ]);
+            } else {
+                // Just update last audit date
+                $item->last_audit_date = now();
+                $item->save();
+            }
+
+            DB::commit();
+
+            return $this->success(
+                $audit->load(['item', 'warehouse', 'auditor'])->toArray(),
+                'Stock audit created successfully',
+                201
+            );
+        } catch (\Exception $e) {
+            DB::rollBack();
+            \Log::error('Stock audit creation failed', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+            ]);
+            return $this->error('Failed to create stock audit: ' . $e->getMessage(), 500);
+        }
+    }
+
+    /**
+     * Get stock audits with filtering
+     */
+    public function getAudits(Request $request)
+    {
+        $companyId = $this->getCompanyId();
+
+        $query = StockAudit::where('company_id', $companyId)
+            ->with(['item', 'warehouse', 'auditor']);
+
+        // Filter by item
+        if ($request->has('item_id')) {
+            $query->where('item_id', $request->input('item_id'));
+        }
+
+        // Filter by warehouse
+        if ($request->has('warehouse_id')) {
+            $query->where('warehouse_id', $request->input('warehouse_id'));
+        }
+
+        // Filter by date range
+        if ($request->has('start_date')) {
+            $query->where('audited_at', '>=', $request->input('start_date'));
+        }
+        if ($request->has('end_date')) {
+            $query->where('audited_at', '<=', $request->input('end_date'));
+        }
+
+        // Filter by variance (discrepancies)
+        if ($request->has('has_variance') && $request->input('has_variance') === 'true') {
+            $query->where('variance', '!=', 0);
+        }
+
+        // Sort
+        $sortField = $request->input('sort_field', 'audited_at');
+        $sortDirection = $request->input('sort_direction', 'desc');
+        $query->orderBy($sortField, $sortDirection);
+
+        $perPage = $request->input('per_page', 15);
+        $audits = $query->paginate($perPage);
+
+        return $this->paginated($audits->items(), [
+            'total' => $audits->total(),
+            'per_page' => $audits->perPage(),
+            'current_page' => $audits->currentPage(),
+            'last_page' => $audits->lastPage(),
+        ]);
+    }
+
+    /**
+     * Get audit statistics
+     */
+    public function getAuditStats(Request $request)
+    {
+        $companyId = $this->getCompanyId();
+
+        $query = StockAudit::where('company_id', $companyId);
+
+        // Filter by date range
+        if ($request->has('start_date')) {
+            $query->where('audited_at', '>=', $request->input('start_date'));
+        }
+        if ($request->has('end_date')) {
+            $query->where('audited_at', '<=', $request->input('end_date'));
+        }
+
+        $totalAudits = $query->count();
+        $auditsWithVariance = (clone $query)->where('variance', '!=', 0)->count();
+        $totalVariance = (clone $query)->sum('variance');
+        $totalVarianceValue = (clone $query)
+            ->join('inventory_items', 'stock_audits.item_id', '=', 'inventory_items.id')
+            ->selectRaw('SUM(stock_audits.variance * inventory_items.cost_price) as total')
+            ->value('total') ?? 0;
+
+        return $this->success([
+            'total_audits' => $totalAudits,
+            'audits_with_variance' => $auditsWithVariance,
+            'total_variance_quantity' => $totalVariance,
+            'total_variance_value' => $totalVarianceValue,
+            'accuracy_rate' => $totalAudits > 0 ? (($totalAudits - $auditsWithVariance) / $totalAudits) * 100 : 0,
+        ]);
     }
 }
 

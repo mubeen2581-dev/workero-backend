@@ -239,6 +239,11 @@ Route::middleware(['auth.jwt'])->group(function () {
         Route::post('/issue-to-job', [InventoryController::class, 'issueToJob'])->middleware('role:admin,manager,warehouse');
         Route::post('/return-from-job/{jobMaterialId}', [InventoryController::class, 'returnFromJob'])->middleware('role:admin,manager,warehouse');
         Route::get('/job/{jobId}/materials', [InventoryController::class, 'getJobMaterials'])->middleware('role:admin,manager,warehouse,technician');
+        
+        // Stock audits
+        Route::post('/audits', [InventoryController::class, 'createAudit'])->middleware('role:admin,manager,warehouse');
+        Route::get('/audits', [InventoryController::class, 'getAudits'])->middleware('role:admin,manager,warehouse');
+        Route::get('/audits/stats', [InventoryController::class, 'getAuditStats'])->middleware('role:admin,manager,warehouse');
     });
 
     // Warehouse routes (Admin/Manager/Warehouse)
