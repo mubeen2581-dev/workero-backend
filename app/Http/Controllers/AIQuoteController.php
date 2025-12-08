@@ -97,27 +97,53 @@ class AIQuoteController extends Controller
             $projectType = $request->input('project_type');
             $itemName = $request->input('item_name');
 
-            // Get historical quotes for analysis
+            // Get historical quotes for analysis (extended to 12 months for better data)
             $historicalQuotes = \App\Models\Quote::where('company_id', $companyId)
                 ->where('status', 'accepted')
-                ->where('created_at', '>=', now()->subMonths(6))
+                ->where('created_at', '>=', now()->subMonths(12))
                 ->with('items')
                 ->get();
 
+            // Enhanced analysis with trend detection
             $analysis = [
                 'total_quotes' => $historicalQuotes->count(),
                 'average_total' => $historicalQuotes->avg('total'),
                 'average_profit_margin' => $historicalQuotes->avg('profit_margin'),
                 'project_type' => $projectType,
+                'price_trend' => $this->calculatePriceTrend($historicalQuotes),
+                'seasonal_patterns' => $this->detectSeasonalPatterns($historicalQuotes),
             ];
 
+            // Project type specific analysis
+            $projectTypeQuotes = $historicalQuotes->filter(function ($quote) use ($projectType) {
+                $quoteDescription = strtolower($quote->notes ?? '');
+                return stripos($quoteDescription, $projectType) !== false;
+            });
+
+            if ($projectTypeQuotes->count() > 0) {
+                $analysis['project_type_specific'] = [
+                    'count' => $projectTypeQuotes->count(),
+                    'average_total' => $projectTypeQuotes->avg('total'),
+                    'average_margin' => $projectTypeQuotes->avg('profit_margin'),
+                ];
+            }
+
             if ($itemName) {
-                // Analyze specific item pricing
+                // Enhanced item analysis with similarity matching
                 $itemPrices = [];
+                $itemQuantities = [];
+                
                 foreach ($historicalQuotes as $quote) {
                     foreach ($quote->items as $item) {
-                        if (stripos($item->description, $itemName) !== false) {
+                        $similarity = $this->calculateStringSimilarity(
+                            strtolower($item->description),
+                            strtolower($itemName)
+                        );
+                        
+                        // Include items with > 60% similarity
+                        if ($similarity > 0.6) {
                             $itemPrices[] = $item->unit_price;
+                            $itemQuantities[] = $item->quantity;
                         }
                     }
                 }
@@ -126,9 +152,12 @@ class AIQuoteController extends Controller
                     $analysis['item_analysis'] = [
                         'item_name' => $itemName,
                         'average_price' => array_sum($itemPrices) / count($itemPrices),
+                        'median_price' => $this->calculateMedian($itemPrices),
                         'min_price' => min($itemPrices),
                         'max_price' => max($itemPrices),
                         'count' => count($itemPrices),
+                        'price_std_dev' => $this->calculateStandardDeviation($itemPrices),
+                        'average_quantity' => !empty($itemQuantities) ? array_sum($itemQuantities) / count($itemQuantities) : 1,
                     ];
                 }
             }
@@ -137,6 +166,109 @@ class AIQuoteController extends Controller
         } catch (\Exception $e) {
             return $this->error('Failed to get historical pricing: ' . $e->getMessage(), null, 500);
         }
+    }
+
+    /**
+     * Calculate price trend from historical quotes
+     */
+    protected function calculatePriceTrend($quotes): string
+    {
+        if ($quotes->count() < 2) {
+            return 'insufficient_data';
+        }
+
+        // Split into two time periods
+        $midpoint = $quotes->count() / 2;
+        $recent = $quotes->take($midpoint)->avg('total');
+        $older = $quotes->skip($midpoint)->avg('total');
+
+        if ($recent > $older * 1.05) {
+            return 'increasing';
+        } elseif ($recent < $older * 0.95) {
+            return 'decreasing';
+        }
+
+        return 'stable';
+    }
+
+    /**
+     * Detect seasonal patterns in pricing
+     */
+    protected function detectSeasonalPatterns($quotes): array
+    {
+        $monthlyAverages = [];
+        
+        foreach ($quotes as $quote) {
+            $month = $quote->created_at->format('F');
+            if (!isset($monthlyAverages[$month])) {
+                $monthlyAverages[$month] = [];
+            }
+            $monthlyAverages[$month][] = $quote->total;
+        }
+
+        $patterns = [];
+        foreach ($monthlyAverages as $month => $prices) {
+            $patterns[$month] = [
+                'average' => array_sum($prices) / count($prices),
+                'count' => count($prices),
+            ];
+        }
+
+        return $patterns;
+    }
+
+    /**
+     * Calculate string similarity (simple Levenshtein-based)
+     */
+    protected function calculateStringSimilarity(string $str1, string $str2): float
+    {
+        $len1 = strlen($str1);
+        $len2 = strlen($str2);
+        
+        if ($len1 === 0 || $len2 === 0) {
+            return 0.0;
+        }
+
+        $maxLen = max($len1, $len2);
+        $distance = levenshtein($str1, $str2);
+        
+        return 1 - ($distance / $maxLen);
+    }
+
+    /**
+     * Calculate median
+     */
+    protected function calculateMedian(array $values): float
+    {
+        sort($values);
+        $count = count($values);
+        $middle = floor(($count - 1) / 2);
+        
+        if ($count % 2) {
+            return $values[$middle];
+        }
+        
+        return ($values[$middle] + $values[$middle + 1]) / 2;
+    }
+
+    /**
+     * Calculate standard deviation
+     */
+    protected function calculateStandardDeviation(array $values): float
+    {
+        $count = count($values);
+        if ($count === 0) {
+            return 0.0;
+        }
+
+        $mean = array_sum($values) / $count;
+        $variance = 0.0;
+        
+        foreach ($values as $value) {
+            $variance += pow($value - $mean, 2);
+        }
+        
+        return sqrt($variance / $count);
     }
 
     /**
@@ -227,6 +359,115 @@ class AIQuoteController extends Controller
         }
 
         return $recommendations;
+    }
+
+    /**
+     * AI Chat interface for quote creation
+     * 
+     * POST /api/quotes/ai/chat
+     */
+    public function chat(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'message' => 'required|string|min:1|max:2000',
+            'conversation_history' => 'nullable|array',
+            'use_groq' => 'nullable|boolean',
+            'use_xe_ai' => 'nullable|boolean',
+        ]);
+
+        if ($validator->fails()) {
+            return $this->error('Validation error', $validator->errors(), 422);
+        }
+
+        try {
+            $companyId = $this->getCompanyId();
+            $message = $request->input('message');
+            $conversationHistory = $request->input('conversation_history', []);
+            $useGroq = $request->input('use_groq', true);
+            $useXEAIService = $request->input('use_xe_ai', false);
+
+            $context = [
+                'company_id' => $companyId,
+                'conversation_history' => $conversationHistory,
+                'smart_pricing' => true,
+            ];
+
+            $response = null;
+            $source = 'rule_based';
+
+            if ($useGroq) {
+                try {
+                    $groqService = app(\App\Services\GroqAIService::class);
+                    $response = $groqService->chatQuoteGeneration($message, $context);
+                    if ($response) {
+                        $source = 'groq_ai';
+                    }
+                } catch (\Exception $e) {
+                    \Log::warning('GROQ Chat unavailable, using fallback: ' . $e->getMessage());
+                }
+            }
+
+            if (!$response && $useXEAIService) {
+                try {
+                    $xeService = app(\App\Services\XEAIService::class);
+                    $response = $xeService->chatQuoteGeneration($message, $context);
+                    if ($response) {
+                        $source = 'xe_ai';
+                    }
+                } catch (\Exception $e) {
+                    \Log::warning('XE AI Chat unavailable, using fallback: ' . $e->getMessage());
+                }
+            }
+
+            // Fallback to rule-based response
+            if (!$response) {
+                $response = $this->generateRuleBasedChatResponse($message, $conversationHistory);
+                $source = 'rule_based';
+            }
+
+            return $this->success([
+                'response' => $response['message'],
+                'suggestions' => $response['suggestions'] ?? [],
+                'source' => $source,
+                'needs_clarification' => $response['needs_clarification'] ?? false,
+            ], 'AI chat response generated');
+        } catch (\Exception $e) {
+            return $this->error('Failed to generate chat response: ' . $e->getMessage(), null, 500);
+        }
+    }
+
+    /**
+     * Generate rule-based chat response
+     */
+    protected function generateRuleBasedChatResponse(string $message, array $history): array
+    {
+        $messageLower = strtolower($message);
+        
+        // Check if user is asking for quote generation
+        if (strpos($messageLower, 'quote') !== false || strpos($messageLower, 'estimate') !== false || 
+            strpos($messageLower, 'price') !== false || strpos($messageLower, 'cost') !== false) {
+            
+            // Generate suggestions based on message
+            $suggestions = $this->aiQuoteService->generateQuoteSuggestions($message, true, $this->getCompanyId());
+            
+            return [
+                'message' => "I've analyzed your project description and generated quote suggestions. Would you like me to add these items to your quote?",
+                'suggestions' => $suggestions,
+                'needs_clarification' => false,
+            ];
+        }
+        
+        // Default helpful response
+        return [
+            'message' => "I can help you create a quote! Please describe your project in detail, including:\n\n" .
+                        "• Project type (kitchen, bathroom, electrical, etc.)\n" .
+                        "• Scope and size\n" .
+                        "• Materials or specific requirements\n" .
+                        "• Budget preferences\n\n" .
+                        "Once you provide the details, I'll generate accurate quote suggestions for you.",
+            'suggestions' => [],
+            'needs_clarification' => true,
+        ];
     }
 
     /**

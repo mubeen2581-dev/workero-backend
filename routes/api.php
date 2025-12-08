@@ -135,6 +135,7 @@ Route::middleware(['auth.jwt'])->group(function () {
         // AI Quote Builder routes
         Route::prefix('ai')->group(function () {
             Route::post('/generate', [\App\Http\Controllers\AIQuoteController::class, 'generateSuggestions'])->middleware('role:admin,manager,dispatcher,technician');
+            Route::post('/chat', [\App\Http\Controllers\AIQuoteController::class, 'chat'])->middleware('role:admin,manager,dispatcher,technician');
             Route::get('/historical-pricing', [\App\Http\Controllers\AIQuoteController::class, 'getHistoricalPricing'])->middleware('role:admin,manager,dispatcher');
             Route::post('/material-recommendations', [\App\Http\Controllers\AIQuoteController::class, 'getMaterialRecommendations'])->middleware('role:admin,manager,dispatcher,technician');
             Route::post('/optimize-pricing', [\App\Http\Controllers\AIQuoteController::class, 'optimizePricing'])->middleware('role:admin,manager,dispatcher');
