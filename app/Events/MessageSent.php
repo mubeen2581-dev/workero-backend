@@ -64,7 +64,9 @@ class MessageSent implements ShouldBroadcast
             'created_at' => $this->message->created_at->toISOString(),
             'sender' => [
                 'id' => $this->message->sender->id ?? null,
-                'name' => $this->message->sender->name ?? 'Unknown',
+                'first_name' => $this->message->sender->first_name ?? null,
+                'last_name' => $this->message->sender->last_name ?? null,
+                'name' => ($this->message->sender->first_name ?? '') . ' ' . ($this->message->sender->last_name ?? '') ?: 'Unknown',
             ],
         ];
     }
