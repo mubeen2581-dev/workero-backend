@@ -281,7 +281,18 @@ Route::middleware(['auth.jwt'])->group(function () {
         Route::post('/upload', [MessageController::class, 'uploadFile']);
         Route::get('/threads', [MessageController::class, 'threads']);
         Route::get('/threads/{id}/messages', [MessageController::class, 'threadMessages']);
+        Route::get('/search', [MessageController::class, 'search']);
+        Route::put('/{id}/read', [MessageController::class, 'markAsRead']);
         Route::get('/templates', [MessageController::class, 'templates']);
+    });
+
+    // Notification routes
+    Route::prefix('notifications')->middleware('role:admin,manager,dispatcher,technician')->group(function () {
+        Route::get('/', [\App\Http\Controllers\NotificationController::class, 'index']);
+        Route::get('/unread-count', [\App\Http\Controllers\NotificationController::class, 'unreadCount']);
+        Route::put('/{id}/read', [\App\Http\Controllers\NotificationController::class, 'markAsRead']);
+        Route::put('/mark-all-read', [\App\Http\Controllers\NotificationController::class, 'markAllAsRead']);
+        Route::delete('/{id}', [\App\Http\Controllers\NotificationController::class, 'destroy']);
     });
 
     // Compliance routes (Admin/Manager/Dispatcher only)

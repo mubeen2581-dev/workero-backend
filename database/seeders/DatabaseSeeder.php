@@ -170,6 +170,9 @@ class DatabaseSeeder extends Seeder
 
         // Seed technician availability defaults
         $this->call(TechnicianAvailabilitySeeder::class);
+        
+        // Seed communication (conversations and messages)
+        $this->call(CommunicationSeeder::class);
     }
 }
 
